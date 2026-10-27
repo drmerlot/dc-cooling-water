@@ -16,7 +16,7 @@ import numpy as np
 import yaml
 from bmipy import Bmi
 
-from . import model
+from . import lake, model
 from .weather import from_open_meteo_json
 
 GAL_PER_M3 = model.GAL_M3
@@ -33,100 +33,57 @@ OUTPUTS = {
 }
 
 
-class CoolingWaterBmi(Bmi):
-    """BMI 2.0 wrapper around dc_cooling_water.model."""
+class _ScalarPointBmi(Bmi):
+    """BMI plumbing shared by the components here: one point (a 'scalar' grid), float64 values held in 1-element
+    arrays so get_value_ptr stays live, inputs set with set_value, and a fixed time step. Subclasses define INPUTS,
+    OUTPUTS, _name, initialize() and _compute()."""
 
-    _name = "Data center cooling water model"
+    INPUTS: dict = {}
+    OUTPUTS: dict = {}
 
     def __init__(self):
-        self._values = {name: np.zeros(1) for name in list(INPUTS) + list(OUTPUTS)}
+        self._values = {name: np.zeros(1) for name in list(self.INPUTS) + list(self.OUTPUTS)}
         self._time = 0.0
         self._dt = 3600.0
         self._end = 365 * 86400.0
-        self._design = "towers"
-        self._mw = 100.0
-        self._params = model.central_parameters()
-        self._forcing = None
-
-    # ---------- control ----------
-    def initialize(self, config_file=None):
-        cfg = {}
-        if config_file:
-            with open(config_file) as f:
-                cfg = yaml.safe_load(f) or {}
-        self._design = cfg.get("design", "towers")
-        if self._design not in model.DESIGNS:
-            raise ValueError(f"design must be one of {model.DESIGNS}")
-        self._mw = float(cfg.get("it_capacity_mw", 100.0))
-        self._dt = float(cfg.get("time_step", 3600.0))
-        self._params = {**model.central_parameters(), **{k: float(v) for k, v in (cfg.get("parameters") or {}).items()}}
-        unknown = set(self._params) - set(model.PARAMETERS)
-        if unknown:
-            raise ValueError(f"unknown parameters: {sorted(unknown)}")
-        self._time = 0.0
-        if cfg.get("forcing"):
-            w = from_open_meteo_json(cfg["forcing"])
-            self._forcing = (w["air_temperature"].values, w["relative_humidity"].values)
-            self._end = float(cfg.get("end_time", len(self._forcing[0]) * self._dt))
-            self._load_forcing()
-        else:
-            self._forcing = None
-            self._end = float(cfg.get("end_time", 365 * 86400.0))
-        self._compute()
-
-    def _load_forcing(self):
-        i = min(int(self._time // self._dt), len(self._forcing[0]) - 1)
-        self._values["atmosphere_bottom_air__temperature"][0] = self._forcing[0][i]
-        self._values["atmosphere_bottom_air_water_vapor__relative_saturation"][0] = self._forcing[1][i]
-
-    def _compute(self):
-        tdb = self._values["atmosphere_bottom_air__temperature"]
-        rh = self._values["atmosphere_bottom_air_water_vapor__relative_saturation"]
-        twb = model.wet_bulb(tdb, rh)
-        w, c, r = model.hourly_rates(tdb, twb, self._design, self._params)
-        kwh_per_s = self._mw * 1000.0 * self._params["utilization"] / 3600.0     # IT energy per second of model time
-        to_m3s = kwh_per_s / GAL_PER_M3
-        self._values["data_center_cooling_water__withdrawal_volume_flux"][0] = w[0] * to_m3s
-        self._values["data_center_cooling_water__consumption_volume_flux"][0] = c[0] * to_m3s
-        self._values["data_center_cooling_water__return_volume_flux"][0] = r[0] * to_m3s
-        self._values["atmosphere_bottom_air__wet_bulb_temperature"][0] = twb[0]
 
     def update(self):
-        """Advance one time step: read the next forcing hour (if any) and recompute the water fluxes."""
         self._time += self._dt
-        if self._forcing is not None:
-            self._load_forcing()
+        self._advance()
         self._compute()
+
+    def _advance(self):
+        """Load the next forcing step, if the component reads forcing itself."""
 
     def update_until(self, time):
         while self._time + self._dt <= time + 1e-9:
             self.update()
 
     def finalize(self):
-        self._forcing = None
+        pass
 
     # ---------- information ----------
     def get_component_name(self):
         return self._name
 
     def get_input_item_count(self):
-        return len(INPUTS)
+        return len(self.INPUTS)
 
     def get_output_item_count(self):
-        return len(OUTPUTS)
+        return len(self.OUTPUTS)
 
     def get_input_var_names(self):
-        return tuple(INPUTS)
+        return tuple(self.INPUTS)
 
     def get_output_var_names(self):
-        return tuple(OUTPUTS)
+        return tuple(self.OUTPUTS)
 
     # ---------- variables ----------
     def _units(self, name):
-        if name in INPUTS:
-            return INPUTS[name]
-        if name in OUTPUTS:
-            return OUTPUTS[name]
+        if name in self.INPUTS:
+            return self.INPUTS[name]
+        if name in self.OUTPUTS:
+            return self.OUTPUTS[name]
         raise KeyError(name)
 
     def get_var_grid(self, name):
@@ -178,13 +135,13 @@ class CoolingWaterBmi(Bmi):
         return dest
 
     def set_value(self, name, src):
-        if name not in INPUTS:
+        if name not in self.INPUTS:
             raise KeyError(f"{name} is not an input variable")
         self._values[name][:] = src
         self._compute()
 
     def set_value_at_indices(self, name, inds, src):
-        if name not in INPUTS:
+        if name not in self.INPUTS:
             raise KeyError(f"{name} is not an input variable")
         self._values[name].put(inds, src)
         self._compute()
@@ -237,3 +194,151 @@ class CoolingWaterBmi(Bmi):
 
     def get_grid_nodes_per_face(self, grid, nodes_per_face):
         raise NotImplementedError("scalar grid has no faces")
+class CoolingWaterBmi(_ScalarPointBmi):
+    """BMI 2.0 wrapper around dc_cooling_water.model: hourly cooling-tower, hybrid and closed-loop water use."""
+
+    INPUTS = INPUTS
+    OUTPUTS = OUTPUTS
+
+    _name = "Data center cooling water model"
+
+    def __init__(self):
+        super().__init__()
+        self._design = "towers"
+        self._mw = 100.0
+        self._params = model.central_parameters()
+        self._forcing = None
+
+    # ---------- control ----------
+    def initialize(self, config_file=None):
+        cfg = {}
+        if config_file:
+            with open(config_file) as f:
+                cfg = yaml.safe_load(f) or {}
+        self._design = cfg.get("design", "towers")
+        if self._design not in model.DESIGNS:
+            raise ValueError(f"design must be one of {model.DESIGNS}")
+        self._mw = float(cfg.get("it_capacity_mw", 100.0))
+        self._dt = float(cfg.get("time_step", 3600.0))
+        self._params = {**model.central_parameters(), **{k: float(v) for k, v in (cfg.get("parameters") or {}).items()}}
+        unknown = set(self._params) - set(model.PARAMETERS)
+        if unknown:
+            raise ValueError(f"unknown parameters: {sorted(unknown)}")
+        self._time = 0.0
+        if cfg.get("forcing"):
+            w = from_open_meteo_json(cfg["forcing"])
+            self._forcing = (w["air_temperature"].values, w["relative_humidity"].values)
+            self._end = float(cfg.get("end_time", len(self._forcing[0]) * self._dt))
+            self._load_forcing()
+        else:
+            self._forcing = None
+            self._end = float(cfg.get("end_time", 365 * 86400.0))
+        self._compute()
+
+    def _load_forcing(self):
+        i = min(int(self._time // self._dt), len(self._forcing[0]) - 1)
+        self._values["atmosphere_bottom_air__temperature"][0] = self._forcing[0][i]
+        self._values["atmosphere_bottom_air_water_vapor__relative_saturation"][0] = self._forcing[1][i]
+
+    def _compute(self):
+        tdb = self._values["atmosphere_bottom_air__temperature"]
+        rh = self._values["atmosphere_bottom_air_water_vapor__relative_saturation"]
+        twb = model.wet_bulb(tdb, rh)
+        w, c, r = model.hourly_rates(tdb, twb, self._design, self._params)
+        kwh_per_s = self._mw * 1000.0 * self._params["utilization"] / 3600.0     # IT energy per second of model time
+        to_m3s = kwh_per_s / GAL_PER_M3
+        self._values["data_center_cooling_water__withdrawal_volume_flux"][0] = w[0] * to_m3s
+        self._values["data_center_cooling_water__consumption_volume_flux"][0] = c[0] * to_m3s
+        self._values["data_center_cooling_water__return_volume_flux"][0] = r[0] * to_m3s
+        self._values["atmosphere_bottom_air__wet_bulb_temperature"][0] = twb[0]
+
+    def _advance(self):
+        if self._forcing is not None:
+            self._load_forcing()
+
+    def finalize(self):
+        self._forcing = None
+
+
+
+
+LAKE_INPUTS = {
+    "lake_water_surface__temperature": "degC",
+    "atmosphere_bottom_air_flow__speed": "m s-1",
+}
+LAKE_OUTPUTS = {
+    "data_center_cooling_water__withdrawal_volume_flux": "m3 s-1",
+    "data_center_cooling_water__return_volume_flux": "m3 s-1",
+    "lake_water__forced_evaporation_volume_flux": "m3 s-1",
+    "data_center_cooling_water__return_temperature_rise": "degC",
+}
+
+
+class LakeCoolingBmi(_ScalarPointBmi):
+    """BMI 2.0 wrapper around dc_cooling_water.lake: once-through lake cooling, daily by default. Inputs are the
+    lake's natural surface temperature and wind speed; outputs the water drawn and returned and the extra
+    evaporation the returned heat causes.
+
+    Configuration (YAML):
+        it_capacity_mw: 100
+        time_step: 86400                         (seconds)
+        end_time: 31536000
+        forcing: path/to/temps.csv               (optional; one water temperature per line, one per step)
+        wind_speed: 4.5                          (m s-1; used when no wind is set; default the middle of the range)
+        parameters: {utilization: 0.75, heat_factor: 1.14, rise_c: 8}
+    """
+
+    INPUTS = LAKE_INPUTS
+    OUTPUTS = LAKE_OUTPUTS
+    _name = "Once-through lake cooling model"
+
+    def __init__(self):
+        super().__init__()
+        self._dt = 86400.0
+        self._mw = 100.0
+        self._params = {k: (a + b) / 2 for k, (a, b) in lake.RANGES.items()}
+        self._forcing = None
+
+    def initialize(self, config_file=None):
+        cfg = {}
+        if config_file:
+            with open(config_file) as f:
+                cfg = yaml.safe_load(f) or {}
+        self._mw = float(cfg.get("it_capacity_mw", 100.0))
+        self._dt = float(cfg.get("time_step", 86400.0))
+        self._params = {**{k: (a + b) / 2 for k, (a, b) in lake.RANGES.items()},
+                        **{k: float(v) for k, v in (cfg.get("parameters") or {}).items()}}
+        unknown = set(self._params) - set(lake.RANGES)
+        if unknown:
+            raise ValueError(f"unknown parameters: {sorted(unknown)}")
+        wind = cfg.get("wind_speed")
+        self._values["atmosphere_bottom_air_flow__speed"][0] = float(wind) if wind is not None else self._params["wind_mph"] / lake.MPH_PER_MS
+        self._time = 0.0
+        self._forcing = None
+        if cfg.get("forcing"):
+            with open(cfg["forcing"]) as f:
+                self._forcing = np.array([float(line) for line in f if line.strip()])
+            self._end = float(cfg.get("end_time", len(self._forcing) * self._dt))
+            self._advance()
+        else:
+            self._end = float(cfg.get("end_time", 365 * 86400.0))
+        self._compute()
+
+    def _advance(self):
+        if self._forcing is not None:
+            i = min(int(self._time // self._dt), len(self._forcing) - 1)
+            self._values["lake_water_surface__temperature"][0] = self._forcing[i]
+
+    def _compute(self):
+        p = self._params
+        t = self._values["lake_water_surface__temperature"]
+        wind_mph = self._values["atmosphere_bottom_air_flow__speed"] * lake.MPH_PER_MS
+        q = lake.withdrawal_m3s(self._mw, p["utilization"], p["heat_factor"], p["rise_c"])
+        self._values["data_center_cooling_water__withdrawal_volume_flux"][0] = q
+        self._values["data_center_cooling_water__return_volume_flux"][0] = q
+        self._values["lake_water__forced_evaporation_volume_flux"][0] = lake.forced_evaporation_m3s(
+            self._mw, p["utilization"], p["heat_factor"], t, wind_mph)[0]
+        self._values["data_center_cooling_water__return_temperature_rise"][0] = p["rise_c"]
+
+    def finalize(self):
+        self._forcing = None

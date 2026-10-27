@@ -1,7 +1,7 @@
 [project]
 name = "dc-cooling-water"
 version = "0.1.0"
-description = "Weather-driven data center cooling water model with Monte Carlo uncertainty, xarray output, dask ensembles and a CSDMS Basic Model Interface (BMI)"
+description = "Weather-driven data center cooling water models (cooling towers, closed loop, lake-source) with Monte Carlo uncertainty, xarray output, dask ensembles, STAC/zarr publishing and CSDMS Basic Model Interfaces (BMI)"
 readme = "README.md"
 license = "BSD-3-Clause"
 authors = [{ name = "Andrew Sommerlot" }]
@@ -15,7 +15,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+stac = ["pystac>=1.10", "zarr>=2.16"]
+test = ["pytest>=7", "pystac>=1.10", "zarr>=2.16"]
 
 [build-system]
 requires = ["hatchling"]

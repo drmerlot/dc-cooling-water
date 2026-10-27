@@ -1,0 +1,326 @@
+{
+  "type": "Feature",
+  "stac_version": "1.1.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/datacube/v2.2.0/schema.json"
+  ],
+  "id": "west-grand-rapids",
+  "geometry": {
+    "type": "Point",
+    "coordinates": [
+      -85.52,
+      42.88
+    ]
+  },
+  "bbox": [
+    -85.52,
+    42.88,
+    -85.52,
+    42.88
+  ],
+  "properties": {
+    "title": "West Grand Rapids",
+    "it_capacity_mw": 100.0,
+    "n_runs": 200,
+    "seed": 7,
+    "designs": [
+      "dry",
+      "assist",
+      "hybrid",
+      "towers"
+    ],
+    "start_datetime": "1995-01-01T00:00:00Z",
+    "end_datetime": "2024-12-31T23:00:00Z",
+    "datetime": null
+  },
+  "links": [
+    {
+      "rel": "root",
+      "href": "../../catalog.json",
+      "type": "application/json",
+      "title": "Data center cooling water, eight Michigan locations"
+    },
+    {
+      "rel": "collection",
+      "href": "../collection.json",
+      "type": "application/json",
+      "title": "Data center cooling water, eight Michigan locations"
+    },
+    {
+      "rel": "parent",
+      "href": "../collection.json",
+      "type": "application/json",
+      "title": "Data center cooling water, eight Michigan locations"
+    }
+  ],
+  "assets": {
+    "data": {
+      "href": "./west-grand-rapids.zarr",
+      "type": "application/vnd+zarr",
+      "title": "Ensemble statistics (zarr v2, consolidated)",
+      "cube:dimensions": {
+        "design": {
+          "type": "other",
+          "values": [
+            "dry",
+            "assist",
+            "hybrid",
+            "towers"
+          ]
+        },
+        "run": {
+          "type": "other",
+          "extent": [
+            0,
+            199
+          ]
+        },
+        "stat": {
+          "type": "other",
+          "values": [
+            "avg",
+            "peak_1in10",
+            "record",
+            "annual_mg"
+          ]
+        },
+        "day": {
+          "type": "temporal",
+          "extent": [
+            "1995-01-01T00:00:00",
+            "2024-12-31T00:00:00"
+          ],
+          "step": "P1D"
+        }
+      },
+      "cube:variables": {
+        "withdrawn": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "run",
+            "stat"
+          ],
+          "unit": "",
+          "description": "withdrawn"
+        },
+        "withdrawn_central": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "stat"
+          ],
+          "unit": "",
+          "description": "withdrawn_central"
+        },
+        "consumed": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "run",
+            "stat"
+          ],
+          "unit": "",
+          "description": "consumed"
+        },
+        "consumed_central": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "stat"
+          ],
+          "unit": "",
+          "description": "consumed_central"
+        },
+        "returned": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "run",
+            "stat"
+          ],
+          "unit": "",
+          "description": "returned"
+        },
+        "returned_central": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "stat"
+          ],
+          "unit": "",
+          "description": "returned_central"
+        },
+        "wue": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "run"
+          ],
+          "unit": "L per IT kWh",
+          "description": "wue"
+        },
+        "wue_makeup": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "run"
+          ],
+          "unit": "L per IT kWh",
+          "description": "wue_makeup"
+        },
+        "param_utilization": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_utilization"
+        },
+        "param_hf_econ": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_hf_econ"
+        },
+        "param_hf_chiller": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_hf_chiller"
+        },
+        "param_wb_econ": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_wb_econ"
+        },
+        "param_wb_chiller": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_wb_chiller"
+        },
+        "param_er_adj": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_er_adj"
+        },
+        "param_coc": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_coc"
+        },
+        "param_range_f": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_range_f"
+        },
+        "param_drift": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_drift"
+        },
+        "param_base_gpkwh": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_base_gpkwh"
+        },
+        "param_assist_on": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_assist_on"
+        },
+        "param_assist_share": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_assist_share"
+        },
+        "param_hybrid_on": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_hybrid_on"
+        },
+        "param_hybrid_full": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_hybrid_full"
+        },
+        "param_base_used": {
+          "type": "data",
+          "dimensions": [
+            "run"
+          ],
+          "unit": "",
+          "description": "param_base_used"
+        },
+        "withdrawn_daily_p50": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "day"
+          ],
+          "unit": "million gallons per day",
+          "description": "median withdrawn volume across runs, by day"
+        },
+        "consumed_daily_p50": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "day"
+          ],
+          "unit": "million gallons per day",
+          "description": "median consumed volume across runs, by day"
+        },
+        "returned_daily_p50": {
+          "type": "data",
+          "dimensions": [
+            "design",
+            "day"
+          ],
+          "unit": "million gallons per day",
+          "description": "median returned volume across runs, by day"
+        }
+      },
+      "roles": [
+        "data"
+      ]
+    }
+  },
+  "collection": "dc-cooling-water-results"
+}

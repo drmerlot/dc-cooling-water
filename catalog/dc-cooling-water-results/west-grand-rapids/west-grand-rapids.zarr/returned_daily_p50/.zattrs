@@ -1,0 +1,8 @@
+{
+  "units": "million gallons per day",
+  "description": "median returned volume across runs, by day",
+  "_ARRAY_DIMENSIONS": [
+    "design",
+    "day"
+  ]
+}

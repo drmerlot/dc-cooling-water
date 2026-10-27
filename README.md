@@ -10,8 +10,11 @@ hour by hour over a multi-decade weather record, for four cooling designs, with 
 - **xarray output**: per-run statistics on `(design, run, stat)`, optional daily volumes on `(design, run, day)`, and
   quantile summaries.
 - **dask** to run many locations in parallel.
-- **A CSDMS Basic Model Interface (BMI 2.0)** through `bmipy`, so a coupling framework can drive the model hour by
-  hour: set air temperature and humidity, call `update()`, read the water fluxes.
+- **CSDMS Basic Model Interfaces (BMI 2.0)** through `bmipy` for two components, so a coupling framework can drive
+  them step by step: `CoolingWaterBmi` (hourly; air temperature and humidity in, water fluxes out) and
+  `LakeCoolingBmi` (daily; lake temperature and wind in, withdrawal and forced lake evaporation out).
+- **A STAC catalog of zarr results** for eight Michigan locations ([`catalog/`](catalog/catalog.json)), with the
+  datacube extension describing every variable, so the outputs are discoverable and open straight into xarray.
 
 It is the model behind [Water Ledger](https://waterledger.org/mi/), a public tool that estimates data center water
 use for every Michigan city and township, extracted as a standalone package. It reproduces Water Ledger's published
@@ -58,7 +61,27 @@ m.update()
 m.get_value("data_center_cooling_water__withdrawal_volume_flux", np.empty(1))      # m3 s-1
 ```
 
-See `examples/` for an eight-location Michigan run and a BMI coupling loop.
+Lake-source (once-through) cooling, from NOAA GLERL lake temperatures:
+
+```python
+from dc_cooling_water import lake
+temps = lake.glerl_temperatures("Lake Michigan")           # long-term daily average surface temperature
+ds = lake.run_lake(temps.values, n=200, mw=300)             # withdrawn, forced evaporation by day of year, ...
+```
+
+Open the published results through STAC:
+
+```python
+import pystac
+from dc_cooling_water.stac import open_item
+
+catalog = pystac.Catalog.from_file("https://raw.githubusercontent.com/drmerlot/dc-cooling-water/main/catalog/catalog.json")
+item = next(catalog.get_items("west-grand-rapids", recursive=True))
+ds = open_item(item)        # per-run statistics, parameters and median daily volumes, as xarray
+```
+
+Browse it in [STAC Browser](https://radiantearth.github.io/stac-browser/#/external/raw.githubusercontent.com/drmerlot/dc-cooling-water/main/catalog/catalog.json).
+See `examples/` for an eight-location Michigan run, the catalog build and a BMI coupling loop.
 
 ## Method
 
@@ -88,11 +111,22 @@ annual total. The reported range is the 10th to 90th percentile across runs. It 
 only: every run sees the same weather record, so it is not a confidence interval and leaves out climate change and
 designs outside the ranges.
 
+## Lake-source cooling
+
+Water drawn through the heat exchangers is heat ÷ (density × specific heat × temperature rise) and nearly all of it
+returns, warmer. The returned heat drives extra evaporation from the lake, estimated with the linearized
+heat-balance method the USGS uses for once-through power plants (Diehl et al. 2013, after Harbeck 1964 and Ward
+1980): the share of added heat leaving as evaporation is dE ÷ (dE + dC + dR), where evaporation and conduction share
+Ward's wind function and radiation does not. Natural surface temperatures are NOAA GLERL long-term daily averages.
+Temperature rise (6–10 °C) and wind (5–15 mph) are estimates.
+
 ## Validation
 
 - **Reproduces Water Ledger.** Run on the same 30 years of ERA5 weather (Grand Rapids area, 1995–2024) with the same
   seed, all 192 West Michigan statistics match the original engine to a relative difference under 1e-15
   (`tests/test_regression.py`; also run in CI, which downloads the record itself).
+- **Lake-source cooling reproduces Water Ledger** for Lakes Michigan, Superior, Huron and Erie, to a relative
+  difference under 1e-15 (`tests/test_lake.py`, data included).
 - **Against published values** (West Michigan, 80% range):
   - Cooling towers: 1.50–1.82 L of makeup water per IT kWh. LBNL (2024) reports a median of about 2.0–2.2 for large
     tower-based facilities across U.S. climates; lower is expected in a cool climate.
@@ -122,7 +156,7 @@ the per-run loop it replaced. Eight Michigan locations take about 32 s serially 
 
 ```bash
 pip install -e ".[test]"
-pytest                                                   # model, ensemble and BMI tests
+pytest                                                   # model, ensemble, lake, BMI and STAC tests
 DCW_FETCH=1 pytest tests/test_regression.py              # downloads the West Michigan record and checks reproduction
 ```
 
@@ -130,6 +164,8 @@ DCW_FETCH=1 pytest tests/test_regression.py              # downloads the West Mi
 
 - Diehl, T. H., Harris, M. A., Murphy, J. C., Hutson, S. S., and Ladd, D. E. (2013). Methods for estimating water
   consumption for thermoelectric power plants in the United States. USGS Scientific Investigations Report 2013-5188.
+  (Source of the cooling-tower evaporative ratio and of the forced-evaporation heat balance after Harbeck 1964 and
+  Ward 1980.)
 - Rutberg, M. J., Delgado, A., Herzog, H. J., and Ghoniem, A. F. (2011). A system-level generic model of water use
   at power plants and its application to regional water use estimation. ASME International Mechanical Engineering
   Congress and Exposition.
@@ -144,6 +180,7 @@ DCW_FETCH=1 pytest tests/test_regression.py              # downloads the West Mi
   climatically similar areas. USGS Scientific Investigations Report 2007-5197.
 - Hersbach, H., et al. (2020). The ERA5 global reanalysis. Quarterly Journal of the Royal Meteorological Society
   146: 1999–2049. Accessed through the Open-Meteo archive API.
+- NOAA Great Lakes Environmental Research Laboratory. Great Lakes long-term average surface water temperature (GLSEA).
 - Hutton, E. W. H., Piper, M. D., and Tucker, G. E. (2020). The Basic Model Interface 2.0. Journal of Open Source
   Software 5(51): 2317.
 

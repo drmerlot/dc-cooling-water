@@ -1,0 +1,8 @@
+{
+  "units": "L per IT kWh",
+  "basis": "withdrawn (makeup)",
+  "_ARRAY_DIMENSIONS": [
+    "design",
+    "run"
+  ]
+}
