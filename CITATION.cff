@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "dc-cooling-water: a weather-driven data center cooling water model with Monte Carlo uncertainty and a Basic Model Interface"
+authors:
+  - family-names: Sommerlot
+    given-names: Andrew
+type: software
+version: 0.1.0
+date-released: 2026-10-27
+license: BSD-3-Clause
+repository-code: "https://github.com/drmerlot/dc-cooling-water"
+keywords: [hydrology, water use, data centers, cooling towers, Monte Carlo, BMI, CSDMS, xarray, dask]
