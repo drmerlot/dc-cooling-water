@@ -1,5 +1,7 @@
 # dc-cooling-water
 
+[![tests](https://github.com/drmerlot/dc-cooling-water/actions/workflows/tests.yml/badge.svg)](https://github.com/drmerlot/dc-cooling-water/actions/workflows/tests.yml)
+
 A weather-driven model of the water a data center's cooling uses: withdrawn, consumed (evaporated) and returned,
 hour by hour over a multi-decade weather record, for four cooling designs, with Monte Carlo uncertainty.
 
@@ -90,7 +92,7 @@ designs outside the ranges.
 
 - **Reproduces Water Ledger.** Run on the same 30 years of ERA5 weather (Grand Rapids area, 1995–2024) with the same
   seed, all 192 West Michigan statistics match the original engine to a relative difference under 1e-15
-  (`tests/test_regression.py`).
+  (`tests/test_regression.py`; also run in CI, which downloads the record itself).
 - **Against published values** (West Michigan, 80% range):
   - Cooling towers: 1.50–1.82 L of makeup water per IT kWh. LBNL (2024) reports a median of about 2.0–2.2 for large
     tower-based facilities across U.S. climates; lower is expected in a cool climate.
