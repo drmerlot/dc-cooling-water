@@ -2,5 +2,6 @@
   "it_capacity_mw": 100,
   "n_runs": 200,
   "seed": 7,
-  "units": "avg, peak_1in10 and record in million gallons per day; annual_mg in million gallons"
+  "units": "avg, peak_1in10, record and max_month in million gallons per day; annual_mg and worst_year_mg in million gallons",
+  "staff_water": "not included; summarize() adds it at the campus's size"
 }

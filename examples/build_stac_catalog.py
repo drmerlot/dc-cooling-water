@@ -19,8 +19,10 @@ if __name__ == "__main__":
     shutil.rmtree("catalog", ignore_errors=True)
     cat = write_catalog(results, "catalog",
                         title="Data center cooling water, eight Michigan locations",
-                        description=("Ensemble statistics from dc-cooling-water for a 100 MW (IT) campus under four cooling designs, "
-                                     "200 Monte Carlo runs on 1995-2024 hourly ERA5 weather at each of eight Michigan locations."),
+                        description=("Ensemble statistics from dc-cooling-water (Water Ledger model 1.2) for a 100 MW (IT) campus under "
+                                     "four cooling designs, 200 Monte Carlo runs on 1995-2024 hourly ERA5 weather at each of eight Michigan "
+                                     "locations. Cooling water, with the closed loop's top-ups; staff water does not scale with capacity, "
+                                     "so it is not included here, and dc_cooling_water.summarize() adds it at a campus's size."),
                         start="1995-01-01", end="2024-12-31T23:00:00")
     cat.validate_all()
     print("catalog written and validated:", sum(1 for _ in cat.get_items(recursive=True)), "items")

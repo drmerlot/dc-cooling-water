@@ -1,11 +1,11 @@
 {
   "shape": [
-    4
+    6
   ],
   "chunks": [
-    4
+    6
   ],
-  "dtype": "<U10",
+  "dtype": "<U13",
   "fill_value": null,
   "order": "C",
   "filters": null,

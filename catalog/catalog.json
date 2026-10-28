@@ -2,7 +2,7 @@
   "type": "Catalog",
   "id": "dc-cooling-water",
   "stac_version": "1.1.0",
-  "description": "Ensemble statistics from dc-cooling-water for a 100 MW (IT) campus under four cooling designs, 200 Monte Carlo runs on 1995-2024 hourly ERA5 weather at each of eight Michigan locations.",
+  "description": "Ensemble statistics from dc-cooling-water (Water Ledger model 1.2) for a 100 MW (IT) campus under four cooling designs, 200 Monte Carlo runs on 1995-2024 hourly ERA5 weather at each of eight Michigan locations. Cooling water, with the closed loop's top-ups; staff water does not scale with capacity, so it is not included here, and dc_cooling_water.summarize() adds it at a campus's size.",
   "links": [
     {
       "rel": "root",

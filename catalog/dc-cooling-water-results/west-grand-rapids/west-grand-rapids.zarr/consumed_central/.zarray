@@ -1,11 +1,11 @@
 {
   "shape": [
     4,
-    4
+    6
   ],
   "chunks": [
     4,
-    4
+    6
   ],
   "dtype": "<f8",
   "fill_value": "NaN",

@@ -81,7 +81,9 @@
             "avg",
             "peak_1in10",
             "record",
-            "annual_mg"
+            "annual_mg",
+            "max_month",
+            "worst_year_mg"
           ]
         },
         "day": {
@@ -241,13 +243,13 @@
           "unit": "",
           "description": "param_drift"
         },
-        "param_base_gpkwh": {
+        "param_fill_gal_per_mw": {
           "type": "data",
           "dimensions": [
             "run"
           ],
           "unit": "",
-          "description": "param_base_gpkwh"
+          "description": "param_fill_gal_per_mw"
         },
         "param_assist_on": {
           "type": "data",
@@ -281,13 +283,13 @@
           "unit": "",
           "description": "param_hybrid_full"
         },
-        "param_base_used": {
+        "param_topup": {
           "type": "data",
           "dimensions": [
             "run"
           ],
           "unit": "",
-          "description": "param_base_used"
+          "description": "param_topup"
         },
         "withdrawn_daily_p50": {
           "type": "data",

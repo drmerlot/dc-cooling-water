@@ -8,10 +8,14 @@ Hour by hour:
       dry-bulb relation used by USGS SIR 2013-5188 for cooling towers.
   drift = a fraction of circulating flow (EPA WaterSense at Work 6.3); circulating flow = heat / (500 x range in F).
   blowdown = evaporation / (cycles of concentration - 1)  (DOE FEMP BMP #10 water balance).
-  base use = a small non-cooling use (staff sanitary use, some humidification, loop top-ups), part of it consumed.
+  loop top-up = the closed loop's small leaks, topped up and all of it lost: 1-5% a year of a loop holding
+      2,000-6,000 gal per MW of IT capacity, spread over the IT energy.
+  staff water = restrooms, kitchens and cleaning for the people on site, about 10% of it lost. It follows the
+      people, who grow slowly with size, so it is not per kWh: staff_water() gives it at the campus's size, to be
+      added to the cooling water (Water Ledger model 1.2).
 
 Designs differ only in when they evaporate:
-  dry     closed loop designed to use no water for cooling: base use only
+  dry     closed loop designed to use no water for cooling: loop top-ups only (plus the staff water every design has)
   assist  closed loop with evaporative assist on the hottest hours (dry-bulb setpoint)
   hybrid  dry coolers most of the year, evaporative in warm weather (ramp between two dry-bulb setpoints)
   towers  open cooling towers, evaporative all year
@@ -38,16 +42,24 @@ RANGES = {
     "coc": (3.0, 7.0),                 # cycles of concentration (DOE FEMP: 2-4 typical, 6+ possible)
     "range_f": (8.0, 15.0),            # tower range, F (USGS SIR 2013-5188)
     "drift": (0.00005, 0.0005),        # drift share of circulating flow (EPA)
-    "base_gpkwh": (0.001, 0.008),      # base use, gal per IT kWh (LBNL 2024: ~0-0.1 L/kWh for designs without water cooling)
+    "fill_gal_per_mw": (2000.0, 6000.0),  # closed loop volume, gal per MW of IT capacity [estimate; Lowell reported a 1.2 million gallon fill]
     "assist_on": (27.5, 31.0),         # dry-bulb C where assist starts (Microsoft: 85 F = 29.4 C)
     "assist_share": (0.10, 0.30),      # assist water as a share of the full evaporative rate [estimate]
     "hybrid_on": (21.0, 27.0),         # dry-bulb C where hybrid starts evaporating [estimate]
     "hybrid_full": (30.0, 33.0),       # dry-bulb C where hybrid is fully evaporative [estimate]
 }
-# Share of base use that is consumed rather than returned [estimate]: sanitary use is ~10% consumed (USGS commercial
-# coefficient, Great Lakes Basin), humidification and watering are fully consumed. Drawn on its own random stream.
-BASE_USED = (0.10, 0.50)
-PARAMETERS = tuple(RANGES) + ("base_used",)
+# Share of the loop volume lost to small leaks and topped up each year (NIH 2023: closed loops typically lose under
+# 5% a year), all of it consumed. Drawn on its own random stream (where model 1.1 drew its base-use share), so the
+# other parameters' draws are unchanged.
+TOPUP = (0.01, 0.05)
+PARAMETERS = tuple(RANGES) + ("topup",)
+
+# Staff water [estimates]. People on site on a typical day = a fixed core plus a little per MW of IT capacity
+# (Michigan's sales tax exemption needs at least 30 new jobs; hyperscale campuses employ tens to a few hundred
+# people), times gallons per person a day (office buildings use about 10-20; more with a cafeteria). About 10% is
+# used up and the rest goes down the drain (USGS consumptive-use coefficients for commercial use, Great Lakes Basin).
+STAFF = {"core": (20.0, 60.0), "per_mw": (0.1, 0.5), "gpcd": (15.0, 30.0), "used": (0.05, 0.15)}
+STAFF_PARAMETERS = tuple(f"staff_{k}" for k in STAFF)
 
 
 def wet_bulb(t_c, rh):
@@ -91,25 +103,47 @@ def hourly_rates(tdb, twb, design, p):
     evap = evap_full * w
     drift = circ * p["drift"] * (w > 0)
     blow = evap / (p["coc"] - 1.0)
-    base = p["base_gpkwh"] * np.ones_like(evap_full)
-    withdrawn = evap + drift + blow + base
-    consumed = evap + drift + base * p["base_used"]
-    returned = blow + base * (1 - p["base_used"])
+    # loop top-up, gal/day per MW of capacity, as gal per IT kWh
+    topup = p["fill_gal_per_mw"] * p["topup"] / 365.0 / (24 * 1000 * p["utilization"]) * np.ones_like(evap_full)
+    withdrawn = evap + drift + blow + topup
+    consumed = evap + drift + topup
+    returned = blow
     return withdrawn, consumed, returned
 
 
 def sample_parameters(n=200, seed=7):
     """Monte Carlo draws: independent uniforms over RANGES (run-major, so the draws match a per-run loop of
-    rng.uniform calls) and base_used from its own stream. Returns {name: array (n,)}."""
+    rng.uniform calls) and topup from its own stream. Returns {name: array (n,)}."""
     lo = np.array([v[0] for v in RANGES.values()])
     hi = np.array([v[1] for v in RANGES.values()])
     u = np.random.default_rng(seed).random((n, len(RANGES)))
     draws = lo + (hi - lo) * u
     out = {k: draws[:, i] for i, k in enumerate(RANGES)}
-    out["base_used"] = BASE_USED[0] + (BASE_USED[1] - BASE_USED[0]) * np.random.default_rng(11).random(n)
+    out["topup"] = TOPUP[0] + (TOPUP[1] - TOPUP[0]) * np.random.default_rng(11).random(n)
     return out
 
 
 def central_parameters():
     """Every parameter at the middle of its range."""
-    return {**{k: (a + b) / 2 for k, (a, b) in RANGES.items()}, "base_used": sum(BASE_USED) / 2}
+    return {**{k: (a + b) / 2 for k, (a, b) in RANGES.items()}, "topup": sum(TOPUP) / 2}
+
+
+def sample_staff(n=200, seed=13):
+    """Monte Carlo draws of the staff water parameters on their own stream (run-major, as Water Ledger's
+    staff_runs): {"staff_core", "staff_per_mw", "staff_gpcd", "staff_used": array (n,)}."""
+    lo = np.array([v[0] for v in STAFF.values()])
+    hi = np.array([v[1] for v in STAFF.values()])
+    draws = lo + (hi - lo) * np.random.default_rng(seed).random((n, len(STAFF)))
+    return {k: draws[:, i] for i, k in enumerate(STAFF_PARAMETERS)}
+
+
+def central_staff():
+    """Staff water parameters at the middle of their ranges."""
+    return {f"staff_{k}": (a + b) / 2 for k, (a, b) in STAFF.items()}
+
+
+def staff_water(s, mw):
+    """Staff water at `mw` MW of IT capacity, million gallons per day: (withdrawn, consumed, returned). s holds
+    the staff parameters (scalars or arrays, as from sample_staff or central_staff)."""
+    g = (s["staff_core"] + s["staff_per_mw"] * mw) * s["staff_gpcd"] / 1e6
+    return g, g * s["staff_used"], g * (1 - s["staff_used"])

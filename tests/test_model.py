@@ -37,12 +37,29 @@ def test_water_balance(design):
     assert np.all(w > 0) and np.all(c >= 0) and np.all(r >= 0)
 
 
-def test_dry_design_uses_base_only():
+def test_dry_design_uses_loop_topups_only():
     _, t, rh = synthetic_weather(30)
     p = model.central_parameters()
     w, c, r = model.hourly_rates(t, model.wet_bulb(t, rh), "dry", p)
-    np.testing.assert_allclose(w, p["base_gpkwh"])
-    np.testing.assert_allclose(c, p["base_gpkwh"] * p["base_used"])
+    # 4,000 gal per MW, 3% a year, spread over the IT energy at 75% utilization
+    topup = 4000 * 0.03 / 365 / (24 * 1000 * 0.75)
+    np.testing.assert_allclose(w, topup)
+    np.testing.assert_allclose(c, topup)        # leaks are all lost
+    np.testing.assert_array_equal(r, 0.0)
+
+
+def test_staff_water():
+    s = model.central_staff()
+    w, c, r = model.staff_water(s, 300)
+    assert w == pytest.approx((40 + 0.3 * 300) * 22.5 / 1e6)
+    assert c == pytest.approx(0.1 * w) and w == pytest.approx(c + r)
+    # it grows with the people on site, more slowly than the computers
+    assert model.staff_water(s, 1000)[0] < 1000 / 300 * w
+    runs = model.sample_staff(50, seed=13)
+    for k, (lo, hi) in model.STAFF.items():
+        v = runs[f"staff_{k}"]
+        assert v.shape == (50,) and v.min() >= lo and v.max() <= hi
+    np.testing.assert_array_equal(model.sample_staff(50)["staff_gpcd"], model.sample_staff(200)["staff_gpcd"][:50])
 
 
 def test_designs_order_by_water_use():
@@ -61,7 +78,7 @@ def test_sampling_matches_per_run_loop():
     vec = model.sample_parameters(n, seed)
     for k in model.RANGES:
         np.testing.assert_allclose(vec[k], [r[k] for r in loop], rtol=1e-14)
-    for k, (lo, hi) in model.RANGES.items():
+    for k, (lo, hi) in [*model.RANGES.items(), ("topup", model.TOPUP)]:
         assert vec[k].min() >= lo and vec[k].max() <= hi
 
 

@@ -52,10 +52,11 @@ def test_set_value_drives_the_model(tmp_path):
     assert hot > cold > 0
     w, c, r = (m.get_value(n, np.empty(1))[0] for n in (WITHDRAWN, CONSUMED, RETURNED))
     assert w == pytest.approx(c + r, rel=1e-12)
-    # matches the model directly: gal per kWh x kWh per second / gal per m3
+    # matches the model directly: gal per kWh x kWh per second / gal per m3, plus staff water at 100 MW
     p = model.central_parameters()
     gal = model.hourly_rates(np.array([0.0]), model.wet_bulb(np.array([0.0]), 50.0), "towers", p)[0][0]
-    assert w == pytest.approx(gal * 100 * 1000 * p["utilization"] / 3600 / model.GAL_M3, rel=1e-12)
+    staff = model.staff_water(model.central_staff(), 100)[0] * 1e6 / 86400 / model.GAL_M3
+    assert w == pytest.approx(gal * 100 * 1000 * p["utilization"] / 3600 / model.GAL_M3 + staff, rel=1e-12)
     ptr = m.get_value_ptr(WITHDRAWN)
     m.set_value(TEMP, np.array([25.0]))
     assert ptr[0] == m.get_value(WITHDRAWN, np.empty(1))[0]     # the pointer stays live
@@ -81,12 +82,29 @@ def test_forcing_file_and_update_until(tmp_path):
         m.update()
     p = {**model.central_parameters(), "coc": 4.0}
     gal = model.hourly_rates(t, model.wet_bulb(t, rh), "hybrid", p)[0]
-    expected = (gal * 50 * 1000 * p["utilization"]).sum() / model.GAL_M3
+    staff = model.staff_water(model.central_staff(), 50)[0] * 1e6 / 24     # gallons an hour
+    expected = (gal * 50 * 1000 * p["utilization"] + staff).sum() / model.GAL_M3
     assert total == pytest.approx(expected, rel=1e-9)
     m.initialize(write_config(tmp_path, design="hybrid", forcing=str(forcing)))
     m.update_until(5 * 3600)
     assert m.get_current_time() == 5 * 3600
     assert m.get_value(TEMP, np.empty(1))[0] == pytest.approx(t[5])
+
+
+def test_closed_loop_includes_staff_water_at_capacity(tmp_path):
+    """A 300 MW closed-loop campus: loop top-ups plus staff water for the people on site, as Water Ledger 1.2."""
+    m = CoolingWaterBmi()
+    m.initialize(write_config(tmp_path, design="dry", it_capacity_mw=300))
+    m.set_value(TEMP, np.array([20.0]))
+    m.set_value(RH, np.array([60.0]))
+    w, c, r = (m.get_value(n, np.empty(1))[0] * 86400 * model.GAL_M3 for n in (WITHDRAWN, CONSUMED, RETURNED))  # gal/day
+    topup = 300 * 4000 * 0.03 / 365
+    staff = (40 + 0.3 * 300) * 22.5
+    assert w == pytest.approx(topup + staff, rel=1e-9)
+    assert c == pytest.approx(topup + 0.1 * staff, rel=1e-9) and w == pytest.approx(c + r, rel=1e-12)
+    m.initialize(write_config(tmp_path, design="dry", it_capacity_mw=300, parameters={"staff_gpcd": 30, "topup": 0.01}))
+    w2 = m.get_value(WITHDRAWN, np.empty(1))[0] * 86400 * model.GAL_M3
+    assert w2 == pytest.approx(300 * 4000 * 0.01 / 365 + 130 * 30, rel=1e-9)
 
 
 def test_bad_configuration(tmp_path):

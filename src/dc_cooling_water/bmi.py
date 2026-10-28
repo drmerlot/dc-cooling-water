@@ -6,11 +6,25 @@ them overridable in the configuration file); the Monte Carlo ensemble lives in d
 
 Configuration (YAML):
     design: dry | assist | hybrid | towers      (default towers)
-    it_capacity_mw: 100                          (IT capacity, MW)
+    it_capacity_mw: 100                          (IT capacity, MW; sets the cooling load and the staff on site)
     time_step: 3600                              (seconds; the model is calibrated hourly)
     end_time: 31536000                           (seconds; default one year)
     forcing: path/to/open_meteo.json             (optional; otherwise inputs come from set_value each step)
-    parameters: {coc: 5, utilization: 0.8, ...}  (optional overrides of the central values)
+    parameters: {coc: 5, utilization: 0.8, staff_gpcd: 20, ...}
+                                                 (optional overrides of the central values: model.PARAMETERS and
+                                                  model.STAFF_PARAMETERS)
+
+Variables (all on the one scalar grid point, float64):
+    input   atmosphere_bottom_air__temperature                         degC     air (dry-bulb) temperature
+    input   atmosphere_bottom_air_water_vapor__relative_saturation     percent  relative humidity
+    output  data_center_cooling_water__withdrawal_volume_flux          m3 s-1   water taken: cooling makeup (evaporation,
+                                                                                drift, blowdown, loop top-ups) plus staff water
+    output  data_center_cooling_water__consumption_volume_flux         m3 s-1   water lost: evaporation, drift, loop top-ups and
+                                                                                the used-up share of staff water
+    output  data_center_cooling_water__return_volume_flux              m3 s-1   water sent out: blowdown and the rest of staff water
+    output  atmosphere_bottom_air__wet_bulb_temperature                degC     wet-bulb temperature (Stull 2011)
+Staff water is a constant flow at the configured capacity (it follows the people on site, not the weather or the
+IT load); withdrawal always equals consumption plus return.
 """
 import numpy as np
 import yaml
@@ -206,7 +220,7 @@ class CoolingWaterBmi(_ScalarPointBmi):
         super().__init__()
         self._design = "towers"
         self._mw = 100.0
-        self._params = model.central_parameters()
+        self._params = {**model.central_parameters(), **model.central_staff()}
         self._forcing = None
 
     # ---------- control ----------
@@ -220,8 +234,9 @@ class CoolingWaterBmi(_ScalarPointBmi):
             raise ValueError(f"design must be one of {model.DESIGNS}")
         self._mw = float(cfg.get("it_capacity_mw", 100.0))
         self._dt = float(cfg.get("time_step", 3600.0))
-        self._params = {**model.central_parameters(), **{k: float(v) for k, v in (cfg.get("parameters") or {}).items()}}
-        unknown = set(self._params) - set(model.PARAMETERS)
+        self._params = {**model.central_parameters(), **model.central_staff(),
+                        **{k: float(v) for k, v in (cfg.get("parameters") or {}).items()}}
+        unknown = set(self._params) - set(model.PARAMETERS) - set(model.STAFF_PARAMETERS)
         if unknown:
             raise ValueError(f"unknown parameters: {sorted(unknown)}")
         self._time = 0.0
@@ -247,9 +262,11 @@ class CoolingWaterBmi(_ScalarPointBmi):
         w, c, r = model.hourly_rates(tdb, twb, self._design, self._params)
         kwh_per_s = self._mw * 1000.0 * self._params["utilization"] / 3600.0     # IT energy per second of model time
         to_m3s = kwh_per_s / GAL_PER_M3
-        self._values["data_center_cooling_water__withdrawal_volume_flux"][0] = w[0] * to_m3s
-        self._values["data_center_cooling_water__consumption_volume_flux"][0] = c[0] * to_m3s
-        self._values["data_center_cooling_water__return_volume_flux"][0] = r[0] * to_m3s
+        mgd_to_m3s = 1e6 / 86400.0 / GAL_PER_M3
+        sw, sc, sr = model.staff_water(self._params, self._mw)
+        self._values["data_center_cooling_water__withdrawal_volume_flux"][0] = w[0] * to_m3s + sw * mgd_to_m3s
+        self._values["data_center_cooling_water__consumption_volume_flux"][0] = c[0] * to_m3s + sc * mgd_to_m3s
+        self._values["data_center_cooling_water__return_volume_flux"][0] = r[0] * to_m3s + sr * mgd_to_m3s
         self._values["atmosphere_bottom_air__wet_bulb_temperature"][0] = twb[0]
 
     def _advance(self):

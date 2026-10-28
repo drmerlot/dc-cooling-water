@@ -3,6 +3,9 @@
 Runs are vectorized: a chunk of parameter draws is evaluated against the whole hourly record at once as
 (runs, hours) arrays, then reduced to daily totals and per-run statistics before the next chunk, so memory stays
 bounded for 30-year hourly records.
+
+Per-run results are the cooling water (with the closed loop's top-ups), which scales with IT capacity. Staff water
+does not, so summarize() adds it at the campus's size, as Water Ledger does (model 1.2).
 """
 from collections.abc import Mapping
 
@@ -12,38 +15,43 @@ import xarray as xr
 
 from . import model
 
-STATS = ("avg", "peak_1in10", "record", "annual_mg")
+STATS = ("avg", "peak_1in10", "record", "annual_mg", "max_month", "worst_year_mg")
+ANNUAL = ("annual_mg", "worst_year_mg")       # million gallons a year; the rest are million gallons a day
 FLOWS = ("withdrawn", "consumed", "returned")
 L_PER_GAL = 3.78541
 
 
 def _day_layout(time):
-    """Day starts for np.add.reduceat, the day labels and the year of each day (local calendar days)."""
+    """Day starts for np.add.reduceat, the day labels and the year and month of each day (local calendar days)."""
     days = np.asarray(time).astype("datetime64[D]")
     if days.size and np.any(np.diff(days).astype(int) < 0):
         raise ValueError("time must be sorted")
     starts = np.r_[0, np.flatnonzero(np.diff(days).astype(int)) + 1]
     labels = days[starts]
     years = labels.astype("datetime64[Y]").astype(int) + 1970
-    return starts, labels, years
+    months = labels.astype("datetime64[M]")
+    return starts, labels, years, months
 
 
-def _stats(daily, years):
+def _stats(daily, years, months):
     """Per-run statistics from daily volumes (runs, days) in million gallons: average day, 1-in-10-year peak day
-    (90th percentile of annual maxima), record day and annual total."""
+    (90th percentile of annual maxima), record day, average year, highest month's average day and highest
+    calendar year."""
     uyears = np.unique(years)
     ann_max = np.stack([daily[:, years == y].max(axis=1) for y in uyears], axis=1)
+    worst_year = np.stack([daily[:, years == y].sum(axis=1) for y in uyears], axis=1).max(axis=1)
+    max_month = np.stack([daily[:, months == m].mean(axis=1) for m in np.unique(months)], axis=1).max(axis=1)
     avg = daily.mean(axis=1)
-    return np.stack([avg, np.quantile(ann_max, 0.9, axis=1), daily.max(axis=1), avg * 365.25], axis=1)
+    return np.stack([avg, np.quantile(ann_max, 0.9, axis=1), daily.max(axis=1), avg * 365.25, max_month, worst_year], axis=1)
 
 
-def _evaluate(tdb, twb, starts, years, design, params, mw):
+def _evaluate(tdb, twb, starts, years, months, design, params, mw):
     """Stats (runs, flows, stats), water use effectiveness (runs, 2) and daily volumes (runs, flows, days)."""
     p = {k: np.asarray(v, dtype=float).reshape(-1, 1) for k, v in params.items()}
     kw = mw * 1000.0 * p["utilization"]
     rates = model.hourly_rates(tdb, twb, design, p)
     daily = [np.add.reduceat(r * kw, starts, axis=1) / 1e6 for r in rates]
-    stats = np.stack([_stats(d, years) for d in daily], axis=1)
+    stats = np.stack([_stats(d, years, months) for d in daily], axis=1)
     wue = np.stack([rates[1].mean(axis=1), rates[0].mean(axis=1)], axis=1) * L_PER_GAL
     return stats, wue, np.stack(daily, axis=1)
 
@@ -54,12 +62,13 @@ def run_ensemble(time, air_temperature, relative_humidity, mw=100.0, n=200, seed
 
     time: hourly timestamps (local), air_temperature in C, relative_humidity in percent. mw is IT capacity in MW.
     Returns an xarray Dataset with per-run statistics (design, run, stat) for each flow, the central (mid-range)
-    run, water use effectiveness, the sampled parameters, and optionally daily volumes (design, run, day).
+    run, water use effectiveness, the sampled parameters, and optionally daily volumes (design, run, day). These are
+    cooling water only (with the closed loop's top-ups); summarize() adds staff water at the campus's size.
     """
     tdb = np.asarray(air_temperature, dtype=float)
     rh = np.asarray(relative_humidity, dtype=float)
     twb = model.wet_bulb(tdb, rh)
-    starts, labels, years = _day_layout(time)
+    starts, labels, years, months = _day_layout(time)
     params = model.sample_parameters(n, seed)
     central = {k: np.array([v]) for k, v in model.central_parameters().items()}
 
@@ -70,15 +79,16 @@ def run_ensemble(time, air_temperature, relative_humidity, mw=100.0, n=200, seed
     for d, design in enumerate(designs):
         for i in range(0, n, chunk):
             sl = slice(i, min(i + chunk, n))
-            s, w, dd = _evaluate(tdb, twb, starts, years, design, {k: v[sl] for k, v in params.items()}, mw)
+            s, w, dd = _evaluate(tdb, twb, starts, years, months, design, {k: v[sl] for k, v in params.items()}, mw)
             st[d, sl], wue[d, sl] = s, w
             if keep_daily:
                 daily[d, sl] = dd
-        cst[d] = _evaluate(tdb, twb, starts, years, design, central, mw)[0][0]
+        cst[d] = _evaluate(tdb, twb, starts, years, months, design, central, mw)[0][0]
 
     coords = {"design": list(designs), "run": np.arange(n), "stat": list(STATS)}
     ds = xr.Dataset(coords=coords, attrs={"it_capacity_mw": mw, "n_runs": n, "seed": seed,
-                                          "units": "avg, peak_1in10 and record in million gallons per day; annual_mg in million gallons"})
+                                          "units": "avg, peak_1in10, record and max_month in million gallons per day; annual_mg and worst_year_mg in million gallons",
+                                          "staff_water": "not included; summarize() adds it at the campus's size"})
     for f, flow in enumerate(FLOWS):
         ds[flow] = (("design", "run", "stat"), st[:, :, f, :])
         ds[f"{flow}_central"] = (("design", "stat"), cst[:, f, :])
@@ -93,13 +103,27 @@ def run_ensemble(time, air_temperature, relative_humidity, mw=100.0, n=200, seed
     return ds
 
 
-def summarize(ds, quantiles=(0.1, 0.5, 0.9)):
-    """Quantiles across runs (and the central run) for each flow: (design, stat, quantile)."""
-    out = xr.Dataset(attrs=ds.attrs)
+def summarize(ds, quantiles=(0.1, 0.5, 0.9), staff=True, staff_n=200, staff_seed=13):
+    """Quantiles across runs (and the central run) for each flow: (design, stat, quantile).
+
+    With staff, staff water at the campus's size (ds.attrs["it_capacity_mw"]) is added as Water Ledger does: its own
+    quantiles over staff_n draws added to the cooling water's at the same quantile (the ranges add end to end, which
+    makes them a little wide), and the central run gets staff water at central values. staff=False gives cooling
+    water alone, which is what scales with capacity (Water Ledger's per-100 MW figures)."""
+    out = xr.Dataset(attrs={**ds.attrs, "staff_water": "included" if staff else "not included"})
     names = [f"p{int(q * 100)}" for q in quantiles] + ["central"]
-    for flow in FLOWS:
+    if staff:
+        mw = ds.attrs["it_capacity_mw"]
+        runs = model.staff_water(model.sample_staff(staff_n, staff_seed), mw)
+        central = model.staff_water(model.central_staff(), mw)
+        per_year = xr.DataArray([365.25 if s in ANNUAL else 1.0 for s in STATS], dims="stat", coords={"stat": list(STATS)})
+    for f, flow in enumerate(FLOWS):
         q = ds[flow].quantile(list(quantiles), dim="run").assign_coords(quantile=names[:-1])
-        out[flow] = xr.concat([q, ds[f"{flow}_central"].expand_dims(quantile=["central"])], dim="quantile").transpose("design", "stat", "quantile")
+        q = xr.concat([q, ds[f"{flow}_central"].expand_dims(quantile=["central"])], dim="quantile")
+        if staff:
+            add = xr.DataArray([*np.quantile(runs[f], list(quantiles)), central[f]], dims="quantile", coords={"quantile": names})
+            q = q + add * per_year.sel(stat=q["stat"])
+        out[flow] = q.transpose("design", "stat", "quantile")
     return out
 
 
